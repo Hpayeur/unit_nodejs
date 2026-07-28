@@ -23,7 +23,7 @@ exports.delete = function (id) {
     return Promise.reject(new Error("Invalid id"));
   }
 
-  return User.remove({
+  return User.deleteOne({
     _id: id,
   });
 };

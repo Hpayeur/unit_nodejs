@@ -5,11 +5,13 @@ chai.use(chaiAsPromised);
 const sinon = require("sinon");
 const sinonChai = require("sinon-chai").default;
 chai.use(sinonChai);
+const rewire = require("rewire");
 
 var mongoose = require("mongoose");
-var users = require("./users");
+var users = rewire("./users");
 var User = require("./models/user");
 const user = require("./models/user");
+var mailer = require("./mailer");
 var sandbox = sinon.createSandbox();
 
 describe("users", () => {
@@ -17,22 +19,28 @@ describe("users", () => {
   let deleteStub;
   let sampleArgs;
   let sampleUser;
+  let mailerStub;
 
   beforeEach(() => {
     sampleUser = {
       id: 123,
       name: "foo",
       email: "foo@bar.com",
+      save: sandbox.stub().resolves(),
     };
     // Remove method no longer works in new versions. has been changed to deleteOne and deleteMany
     findStub = sandbox.stub(mongoose.Model, "findById").resolves(sampleUser);
     deleteStub = sandbox
       .stub(mongoose.Model, "deleteOne")
       .resolves("fake_remove_result");
+    mailerStub = sandbox
+      .stub(mailer, "sendWelcomeEmail")
+      .resolves("fake_email");
   });
 
   afterEach(() => {
     sandbox.restore();
+    users = rewire("./users");
   });
 
   context("get", () => {
@@ -96,11 +104,95 @@ describe("users", () => {
       return expect(users.delete()).to.eventually.be.rejectedWith("Invalid id");
     });
 
-    it("should call User.remove", async () => {
+    it("should call User.deleteOne", async () => {
       let result = await users.delete(123);
 
       expect(result).to.equal("fake_remove_result");
       expect(deleteStub).to.have.been.calledWith({ _id: 123 });
+    });
+  });
+
+  context("create user", () => {
+    let FakeUserClass, saveStub, result;
+
+    beforeEach(async () => {
+      saveStub = sandbox.stub().resolves(sampleUser);
+      FakeUserClass = sandbox.stub().returns({ save: saveStub });
+
+      users.__set__("User", FakeUserClass);
+      result = await users.create(sampleUser);
+    });
+    it("create user", async () => {
+      await expect(users.create()).to.eventually.be.rejectedWith(
+        "Invalid arguments",
+      );
+      await expect(users.create({ name: "foo" })).to.eventually.be.rejectedWith(
+        "Invalid arguments",
+      );
+      await expect(
+        users.create({ email: "foo@bar.com" }),
+      ).to.eventually.be.rejectedWith("Invalid arguments");
+    });
+
+    it("should call User with new", () => {
+      expect(FakeUserClass).to.have.been.calledWithNew;
+      expect(FakeUserClass).to.have.been.calledWith(sampleUser);
+    });
+
+    it("should save the user", () => {
+      expect(saveStub).to.have.been.called;
+    });
+    it("should call mailer with email and name", () => {
+      expect(mailerStub).to.have.been.calledWith(
+        sampleUser.email,
+        sampleUser.name,
+      );
+    });
+
+    it("should reject errors", async () => {
+      saveStub.rejects(new Error("fake"));
+      await expect(users.create(sampleUser)).to.eventually.be.rejectedWith(
+        "fake",
+      );
+    });
+  });
+
+  context("update user", () => {
+    it("should find user by id", async () => {
+      await users.update(123, { age: 35 });
+      expect(findStub).to.have.calledWith(123);
+    });
+
+    it("should call user.save", async () => {
+      await users.update(123, { age: 35 });
+
+      expect(sampleUser.save).to.have.been.calledOnce;
+    });
+
+    it("should reject if there is an error", async () => {
+      findStub.throws(new Error("fake"));
+      await expect(
+        users.update(123, { age: 35 }),
+      ).to.eventually.be.rejectedWith("fake");
+    });
+  });
+
+  context("reset password", () => {
+    let resetStub;
+
+    beforeEach(() => {
+      resetStub = sandbox
+        .stub(mailer, "sendPasswordResetEmail")
+        .resolves("reset");
+    });
+    it("should check for email", async () => {
+      await expect(users.resetPassword()).to.eventually.be.rejectedWith(
+        "Invalid email",
+      );
+    });
+    it("should call sendPasswordResetEmail", async () => {
+      await users.resetPassword("foo@bar.com");
+      expect(resetStub).to.have.been.calledWith("foo@bar.com");
     });
   });
 });
