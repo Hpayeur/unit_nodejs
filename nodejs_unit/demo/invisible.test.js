@@ -12,4 +12,4 @@ describe("invisible", () => {
   });
 });
 
-//Another line of code i can add \"./{,!(node_modules)/**/}*.test.js\"
+//Another line of code i can add to Test my code \"./{,!(node_modules)/**/}*.test.js\"
